@@ -104,6 +104,7 @@ class TTSEngine:
         if not text: return
         if interrupt:
             self.clear_queue()
+            self.kill_pipeline() # Hard stop the current audio
         self.speech_queue.put(text)
 
 

@@ -16,6 +16,11 @@ _left_pwm = None
 _right_pwm = None
 _latest_labels = []
 _latest_labels_lock = threading.Lock()
+_latest_frame_jpeg = None
+_latest_frame_lock = threading.Lock()
+_latest_distance = 0.0
+_is_urgent = False
+_status_lock = threading.Lock()
 SENSOR_TRIG_PIN1 = 13
 SENSOR_ECHO_PIN1 = 11
 SENSOR_TRIG_PIN2 = 16
@@ -150,19 +155,16 @@ def measure_distance(TRIG, ECHO):
     time.sleep(0.00001)
     GPIO.output(TRIG, GPIO.LOW)
 
-    MAX_TIMEOUT = 0.3 # 300 ms timeout
-    t_timeout = time.time()
+    # Use wait_for_edge for better CPU usage
+    # Wait for Rising edge (start of echo)
+    if not GPIO.wait_for_edge(ECHO, GPIO.RISING, timeout=300): # 300ms timeout
+        return 999
+    pulse_start = time.time()
 
-    while GPIO.input(ECHO) == 0: # Wait for the echo start
-        if time.time() - t_timeout > MAX_TIMEOUT:
-            return 999  # Timeout, return out of range
-        pulse_start = time.time()
-
-    t_timeout = time.time()
-    while GPIO.input(ECHO) == 1:
-        if time.time() - t_timeout > MAX_TIMEOUT:
-            return 999  # Timeout, return out of range
-        pulse_end = time.time()
+    # Wait for Falling edge (end of echo)
+    if not GPIO.wait_for_edge(ECHO, GPIO.FALLING, timeout=300):
+        return 999
+    pulse_end = time.time()
 
     pulse_duration = pulse_end - pulse_start # Calculate pulse duration and distance
     distance_cm = pulse_duration * 17150
@@ -220,29 +222,44 @@ def labels_from_result(result, conf_min: float = 0.70):
     return out
 
 
+def camera_processing_thread():
+    global _latest_frame_jpeg
+    print("Camera processing thread started.")
+    while True:
+        try:
+            frame = picam.capture_array() # Capture frame from Picamera2
+            
+            # Inference
+            results = model(frame, verbose=False, classes=DETECT_CLASSES) # Run the YOLO model
+            r = results[0] 
+            labels = labels_from_result(r, conf_min=0.70) 
+            set_latest_labels(labels) 
+
+            # Visualization
+            annotated_frame = r.plot() 
+            ret, buffer = cv2.imencode('.jpg', annotated_frame) 
+            
+            if ret:
+                with _latest_frame_lock:
+                    _latest_frame_jpeg = buffer.tobytes()
+            
+            time.sleep(0.01) # Yield slightly
+            
+        except Exception as e:
+            print(f"Camera thread error: {e}")
+            time.sleep(1)
+
+
 def generate_frames():
     while True:
-        frame = picam.capture_array() # Capture frame from Picamera2
-        t0 = time.perf_counter() # Start time for fps measurement
-
-        results = model(frame, verbose=False, classes=DETECT_CLASSES) # Run the YOLO model on a certain amount of classes
-        r = results[0] # Extract the Results object from the list
-        labels = labels_from_result(r, conf_min=0.70) # Get labels from the Results object with confidence filtering
-        set_latest_labels(labels) # Set the thread-safe variable
-
-        t1 = time.perf_counter() # End time for fps measurement
-        elpased_ms = (t1 - t0) * 1000
-        fps = 1000 / elpased_ms
-        print(f"Inference time: {elpased_ms:.2f} ms, FPS: {fps:.2f}") # Print time for observation
-
-        annotated_frame = r.plot() # Draw bounding boxes
-        ret, buffer = cv2.imencode('.jpg', annotated_frame) # Turn the frame into JPEG and send to stream through Flask
-        if not ret:
-            continue
-        frame_bytes = buffer.tobytes()
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        time.sleep(0.05) # Rest the CPU
+        with _latest_frame_lock:
+            frame_data = _latest_frame_jpeg
+        
+        if frame_data:
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n')
+        
+        time.sleep(0.05) # Limit web stream FPS to save bandwidth
 
 
 def select_biggest_label(labels): # Select the label with the highest area
@@ -287,6 +304,11 @@ def main_loop():
                 distance1 = generate_distance(SENSOR_TRIG_PIN1, SENSOR_ECHO_PIN1) 
                 distance2 = generate_distance(SENSOR_TRIG_PIN2, SENSOR_ECHO_PIN2) # Measure from the two sensors
                 distance_cm = min(distance1, distance2)
+                
+                # Update global status for web UI
+                with _status_lock:
+                    _latest_distance = distance_cm
+                    _is_urgent = distance_cm < 60
 
                 should_vibrate = False
 
@@ -336,22 +358,41 @@ HTML_PAGE = """
     <title>NaviGlass Control</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body { font-family: sans-serif; background: #1a1a1a; color: white; text-align: center; padding: 20px; }
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a1a; color: white; text-align: center; padding: 20px; transition: background 0.3s; }
         .container { max-width: 800px; margin: 0 auto; }
-        img { width: 100%; max-width: 640px; border-radius: 8px; border: 2px solid #444; }
-        .card { background: #333; padding: 20px; border-radius: 10px; margin-top: 20px; }
-        button { padding: 10px 15px; font-size: 14px; border-radius: 5px; border: none; cursor: pointer; margin: 2px; }
-        .scan { background: #007bff; color: white; width: 100%; padding: 15px; font-size: 18px; margin-bottom: 10px; }
+        img { width: 100%; max-width: 640px; border-radius: 12px; border: 2px solid #444; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        .card { background: #2d2d2d; padding: 20px; border-radius: 12px; margin-top: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        button { padding: 12px 20px; font-size: 14px; border-radius: 6px; border: none; cursor: pointer; margin: 4px; font-weight: bold; transition: opacity 0.2s; }
+        button:hover { opacity: 0.9; }
+        .scan { background: #007bff; color: white; width: 100%; padding: 15px; font-size: 16px; margin-bottom: 10px; }
         .pair { background: #28a745; color: white; }
         .connect { background: #17a2b8; color: white; }
         .disconnect { background: #dc3545; color: white; } 
-        li { background: #444; margin: 10px 0; padding: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; text-align: left; }
+        li { background: #3a3a3a; margin: 10px 0; padding: 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; text-align: left; }
+        
+        .danger-box {
+            background: #ff3333; color: white; padding: 15px; font-size: 24px; font-weight: bold;
+            animation: blink 0.5s infinite; margin-bottom: 20px; border-radius: 10px; display: none;
+            text-transform: uppercase; letter-spacing: 2px;
+        }
+        @keyframes blink { 0% {opacity: 1;} 50% {opacity: 0.4;} 100% {opacity: 1;} }
+        
+        .telemetry-val { font-size: 32px; font-weight: bold; color: #4db8ff; }
+        .label { color: #aaa; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
     </style>
 </head>
 <body>
     <div class="container">
+        <div id="danger-alert" class="danger-box">⚠️ STOP! OBSTACLE DETECTED ⚠️</div>
+        
         <h1>NaviGlass Live View</h1>
         <img src="/video_feed" />
+        
+        <div class="card">
+            <div class="label">Distance to Object</div>
+            <div class="telemetry-val"><span id="dist-val">--</span> cm</div>
+        </div>
+
         <div class="card">
             <h2>Bluetooth Manager</h2>
             <div id="status" style="color:#aaa; margin-bottom:10px;">Ready</div>
@@ -362,6 +403,28 @@ HTML_PAGE = """
     <script>
         function updateStatus(msg) { document.getElementById('status').innerText = msg; }
         
+        // Telemetry Polling
+        setInterval(async () => {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                
+                // Update distance
+                const dist = data.distance;
+                document.getElementById('dist-val').innerText = dist > 900 ? "> 400" : Math.round(dist);
+                
+                // Handle Danger Mode
+                const alert = document.getElementById('danger-alert');
+                if (data.urgent) {
+                    alert.style.display = 'block';
+                    document.body.style.background = '#4a0000'; // Dark red background
+                } else {
+                    alert.style.display = 'none';
+                    document.body.style.background = '#1a1a1a';
+                }
+            } catch(e) { console.error(e); }
+        }, 250); // Poll every 250ms
+
         async function scanDevices() {
             updateStatus("Scanning...");
             document.querySelector('.scan').disabled = true;
@@ -410,6 +473,14 @@ def index():
 @app.route('/video_feed')
 def video_feed():
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/api/status')
+def api_status():
+    with _status_lock:
+        return jsonify({
+            "distance": _latest_distance,
+            "urgent": _is_urgent
+        })
 
 # --- Bluetooth API Endpoints ---
 
@@ -481,6 +552,11 @@ if __name__ == '__main__': # Main function
         runner = main_loop
         t = threading.Thread(target=runner, daemon=True)
         t.start()
+        
+        # Start camera thread
+        cam_t = threading.Thread(target=camera_processing_thread, daemon=True)
+        cam_t.start()
+        
     except Exception as e:
         print(f"Failed to start main loop: {e}")
 
