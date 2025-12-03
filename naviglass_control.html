@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>NaviGlass Control</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #1a1a1a;
+            color: white;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        img {
+            width: 100%;
+            max-width: 640px;
+            border-radius: 8px;
+            border: 2px solid #444;
+        }
+
+        .card {
+            background: #333;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 10px 15px;
+            font-size: 14px;
+            border-radius: 5px;
+            border: none;
+            cursor: pointer;
+            margin: 2px;
+        }
+
+        .scan {
+            background: #007bff;
+            color: white;
+            width: 100%;
+            padding: 15px;
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+
+        .pair {
+            background: #28a745;
+            color: white;
+        }
+
+        .connect {
+            background: #17a2b8;
+            color: white;
+        }
+
+        .disconnect {
+            background: #dc3545;
+            color: white;
+        }
+
+        li {
+            background: #444;
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            text-align: left;
+        }
+
+        .connection-setup {
+            background: #2d2d2d;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .connection-setup input {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #555;
+            border-radius: 5px;
+            background: #1a1a1a;
+            color: white;
+            margin-bottom: 10px;
+        }
+
+        .connection-setup button {
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+            background: #007bff;
+            color: white;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+
+        .status-connected {
+            background: #28a745;
+        }
+
+        .status-disconnected {
+            background: #dc3545;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>NaviGlass Live View <span class="status-indicator status-disconnected"
+                id="connectionStatus">Disconnected</span></h1>
+
+        <div class="connection-setup">
+            <h3>Server Connection</h3>
+            <input type="text" id="serverUrl" placeholder="http://192.168.1.X:5000" value="http://localhost:5000">
+            <button onclick="updateServerUrl()">Connect</button>
+        </div>
+
+        <img id="videoFeed" src="/video_feed" />
+
+        <div class="card">
+            <h2>Bluetooth Manager</h2>
+            <div id="status" style="color:#aaa; margin-bottom:10px;">Ready</div>
+            <button class="scan" onclick="scanDevices()">Scan for Devices</button>
+            <ul id="deviceList"></ul>
+        </div>
+    </div>
+    <script>
+        // Load saved server URL from localStorage
+        let SERVER_URL = localStorage.getItem('naviglassServerUrl') || 'http://localhost:5000';
+        document.getElementById('serverUrl').value = SERVER_URL;
+        updateVideoFeed();
+
+        function updateServerUrl() {
+            SERVER_URL = document.getElementById('serverUrl').value.trim();
+            localStorage.setItem('naviglassServerUrl', SERVER_URL);
+            updateVideoFeed();
+            updateStatus("Server URL updated to: " + SERVER_URL);
+
+            // Test connection
+            fetch(SERVER_URL + '/')
+                .then(() => {
+                    document.getElementById('connectionStatus').textContent = 'Connected';
+                    document.getElementById('connectionStatus').className = 'status-indicator status-connected';
+                })
+                .catch(() => {
+                    document.getElementById('connectionStatus').textContent = 'Connection Failed';
+                    document.getElementById('connectionStatus').className = 'status-indicator status-disconnected';
+                });
+        }
+
+        function updateVideoFeed() {
+            document.getElementById('videoFeed').src = SERVER_URL + '/video_feed';
+        }
+
+        function updateStatus(msg) {
+            document.getElementById('status').innerText = msg;
+        }
+
+        async function scanDevices() {
+            updateStatus("Scanning...");
+            document.querySelector('.scan').disabled = true;
+            try {
+                const res = await fetch(SERVER_URL + '/api/scan');
+                const devs = await res.json();
+                const list = document.getElementById('deviceList');
+                list.innerHTML = '';
+                devs.forEach(d => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `
+                        <span><strong>${d.name}</strong><br><small>${d.mac}</small></span>
+                        <div>
+                            <button class="pair" onclick="apiCall('/api/pair', '${d.mac}')">Pair</button>
+                            <button class="connect" onclick="apiCall('/api/connect', '${d.mac}')">Connect</button>
+                            <button class="disconnect" onclick="apiCall('/api/disconnect', '${d.mac}')">Disconnect</button>
+                        </div>`;
+                    list.appendChild(li);
+                });
+                updateStatus("Scan complete.");
+            } catch (e) {
+                updateStatus("Error: " + e);
+            }
+            document.querySelector('.scan').disabled = false;
+        }
+
+        async function apiCall(endpoint, mac) {
+            updateStatus("Processing " + mac + "...");
+            const res = await fetch(SERVER_URL + endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mac: mac })
+            });
+            const data = await res.json();
+            updateStatus(data.message);
+        }
+
+        // Test connection on load
+        setTimeout(updateServerUrl, 500);
+    </script>
+</body>
+
+</html>

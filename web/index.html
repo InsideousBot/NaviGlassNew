@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NaviGlass Control Center</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-card: rgba(20, 20, 30, 0.7);
+            --bg-glass: rgba(255, 255, 255, 0.05);
+            --border-glass: rgba(255, 255, 255, 0.1);
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0b0;
+            --accent-blue: #4a9eff;
+            --accent-purple: #a855f7;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-orange: #f59e0b;
+            --shadow-glow: 0 0 40px rgba(74, 158, 255, 0.2);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 100%);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 20px;
+            transition: background 0.5s ease;
+        }
+
+        body.danger-mode {
+            background: linear-gradient(135deg, #2a0000 0%, #4a0000 100%);
+            animation: pulse-bg 1s infinite;
+        }
+
+        @keyframes pulse-bg {
+            0%, 100% { background: linear-gradient(135deg, #2a0000 0%, #4a0000 100%); }
+            50% { background: linear-gradient(135deg, #3a0000 0%, #5a0000 100%); }
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        .glass-card {
+            background: var(--bg-glass);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border-glass);
+            border-radius: 20px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .glass-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        .card-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .connection-card {
+            background: linear-gradient(135deg, rgba(74, 158, 255, 0.1), rgba(168, 85, 247, 0.1));
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            padding: 12px 16px;
+            color: white;
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.1);
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-glow);
+        }
+
+        .btn-success { background: var(--accent-green); color: white; }
+        .btn-danger { background: var(--accent-red); color: white; }
+        .btn-warning { background: var(--accent-orange); color: white; }
+
+        .btn-success:hover, .btn-danger:hover, .btn-warning:hover {
+            transform: translateY(-2px);
+            filter: brightness(1.1);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .status-connected {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--accent-green);
+        }
+
+        .status-disconnected {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--accent-red);
+        }
+
+        .video-container {
+            position: relative;
+            border-radius: 15px;
+            overflow: hidden;
+            background: rgba(0, 0, 0, 0.5);
+            aspect-ratio: 4/3;
+        }
+
+        .video-feed {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .emergency-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 20px;
+            background: linear-gradient(180deg, rgba(239, 68, 68, 0.95), rgba(220, 38, 38, 0.95));
+            z-index: 1000;
+            text-align: center;
+            font-size: 2rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            animation: blink 0.8s infinite;
+            box-shadow: 0 10px 50px rgba(239, 68, 68, 0.5);
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .telemetry-display {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .telemetry-item {
+            text-align: center;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .telemetry-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+
+        .telemetry-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .slider-container {
+            margin: 20px 0;
+        }
+
+        .slider-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+        }
+
+        .slider {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 8px;
+            border-radius: 5px;
+            background: linear-gradient(90deg, rgba(74, 158, 255, 0.2), rgba(168, 85, 247, 0.2));
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(74, 158, 255, 0.5);
+            transition: all 0.3s ease;
+        }
+
+        .slider::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 0 20px rgba(74, 158, 255, 0.8);
+        }
+
+        .device-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .device-item {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+
+        .device-item:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(74, 158, 255, 0.3);
+        }
+
+        .device-info h4 {
+            margin-bottom: 4px;
+        }
+
+        .device-info p {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .device-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .device-actions .btn {
+            padding: 8px 16px;
+            font-size: 0.85rem;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .header h1 { font-size: 2rem; }
+            .telemetry-value { font-size: 2rem; }
+            .device-item {
+                flex-direction: column;
+                gap: 12px;
+            }
+            .device-actions {
+                width: 100%;
+                justify-content: stretch;
+            }
+            .device-actions .btn {
+                flex: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="emergency-overlay" id="emergencyAlert">
+        ⚠️ STOP! OBSTACLE DETECTED ⚠️
+    </div>
+
+    <div class="container">
+        <div class="header">
+            <h1>NaviGlass Control Center</h1>
+            <p>Real-time monitoring and control for your NaviGlass device</p>
+        </div>
+
+        <!-- Connection Setup -->
+        <div class="glass-card connection-card">
+            <div class="card-title">🌐 Server Connection</div>
+            <div class="input-group">
+                <input type="text" id="serverUrl" placeholder="http://192.168.1.X:5000" value="http://localhost:5000">
+                <button class="btn btn-primary" onclick="connectServer()">Connect</button>
+            </div>
+            <div id="connectionStatus">
+                <span class="status-badge status-disconnected">Disconnected</span>
+            </div>
+        </div>
+
+        <!-- Video Feed -->
+        <div class="glass-card">
+            <div class="card-title">📹 Live Camera Feed</div>
+            <div class="video-container">
+                <img id="videoFeed" class="video-feed" src="" alt="Camera feed will appear here">
+            </div>
+        </div>
+
+        <!-- Telemetry -->
+        <div class="glass-card">
+            <div class="card-title">📊 Telemetry</div>
+            <div class="telemetry-display">
+                <div class="telemetry-item">
+                    <div class="telemetry-label">Distance</div>
+                    <div class="telemetry-value" id="distanceValue">--</div>
+                    <div class="telemetry-label">centimeters</div>
+                </div>
+                <div class="telemetry-item">
+                    <div class="telemetry-label">Status</div>
+                    <div class="telemetry-value" id="statusValue" style="font-size: 1.5rem;">SAFE</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vibration Control -->
+        <div class="glass-card">
+            <div class="card-title">📳 Vibration Control</div>
+            <div class="slider-container">
+                <div class="slider-label">
+                    <span>Intensity</span>
+                    <span id="vibrationPercent">100%</span>
+                </div>
+                <input type="range" min="0" max="100" value="100" class="slider" id="vibrationSlider">
+            </div>
+        </div>
+
+        <!-- Bluetooth Manager -->
+        <div class="glass-card">
+            <div class="card-title">🎧 Bluetooth Manager</div>
+            <button class="btn btn-primary" onclick="scanDevices()" style="width: 100%; margin-bottom: 15px;">
+                <span id="scanText">Scan for Devices</span>
+            </button>
+            <div id="statusMessage" style="margin-bottom: 15px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.03); display: none;"></div>
+            <div class="device-list" id="deviceList"></div>
+        </div>
+    </div>
+
+    <script>
+        let SERVER_URL = 'http://localhost:5000';
+        let isConnected = false;
+        let statusPollInterval = null;
+
+        // Load saved server URL
+        if (localStorage.getItem('naviglassServer')) {
+            SERVER_URL = localStorage.getItem('naviglassServer');
+            document.getElementById('serverUrl').value = SERVER_URL;
+        }
+
+        function connectServer() {
+            SERVER_URL = document.getElementById('serverUrl').value.trim();
+            localStorage.setItem('naviglassServer', SERVER_URL);
+            
+            // Update video feed
+            document.getElementById('videoFeed').src = `${SERVER_URL}/video_feed`;
+            
+            // Start polling
+            if (statusPollInterval) clearInterval(statusPollInterval);
+            statusPollInterval = setInterval(updateStatus, 250);
+            
+            // Test connection
+            fetch(`${SERVER_URL}/api/status`)
+                .then(res => res.json())
+                .then(() => {
+                    isConnected = true;
+                    document.getElementById('connectionStatus').innerHTML = 
+                        '<span class="status-badge status-connected">Connected</span>';
+                    showMessage('Connected successfully!', 'success');
+                })
+                .catch(() => {
+                    isConnected = false;
+                    document.getElementById('connectionStatus').innerHTML = 
+                        '<span class="status-badge status-disconnected">Connection Failed</span>';
+                    showMessage('Connection failed. Check URL and try again.', 'error');
+                });
+        }
+
+        async function updateStatus() {
+            if (!isConnected) return;
+            
+            try {
+                const res = await fetch(`${SERVER_URL}/api/status`);
+                const data = await res.json();
+                
+                // Update distance
+                const dist = data.distance;
+                document.getElementById('distanceValue').textContent = 
+                    dist > 900 ? '>400' : Math.round(dist);
+                
+                // Update status
+                if (data.urgent) {
+                    document.getElementById('statusValue').textContent = 'DANGER';
+                    document.getElementById('statusValue').style.color = 'var(--accent-red)';
+                    document.getElementById('emergencyAlert').style.display = 'block';
+                    document.body.classList.add('danger-mode');
+                } else {
+                    document.getElementById('statusValue').textContent = 'SAFE';
+                    document.getElementById('statusValue').style.color = '';
+                    document.getElementById('emergencyAlert').style.display = 'none';
+                    document.body.classList.remove('danger-mode');
+                }
+                
+                // Update vibration slider from server
+                if (data.vibration_intensity !== undefined) {
+                    const percent = Math.round(data.vibration_intensity * 100);
+                    document.getElementById('vibrationSlider').value = percent;
+                    document.getElementById('vibrationPercent').textContent = percent + '%';
+                }
+                
+            } catch (e) {
+                console.error('Status update failed:', e);
+            }
+        }
+
+        // Vibration slider
+        document.getElementById('vibrationSlider').addEventListener('input', function(e) {
+            const percent = e.target.value;
+            document.getElementById('vibrationPercent').textContent = percent + '%';
+        });
+
+        document.getElementById('vibrationSlider').addEventListener('change', async function(e) {
+            const percent = e.target.value;
+            const intensity = percent / 100.0;
+            
+            try {
+                const res = await fetch(`${SERVER_URL}/api/settings/vibration`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ intensity: intensity })
+                });
+                
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showMessage(`Vibration set to ${percent}%`, 'success');
+                } else {
+                    showMessage('Failed to update vibration', 'error');
+                }
+            } catch (e) {
+                showMessage('Error updating vibration', 'error');
+            }
+        });
+
+        async function scanDevices() {
+            const btn = document.querySelector('button[onclick="scanDevices()"]');
+            const scanText = document.getElementById('scanText');
+            
+            btn.disabled = true;
+            scanText.innerHTML = '<span class="loading"></span> Scanning...';
+            
+            try {
+                const res = await fetch(`${SERVER_URL}/api/scan`);
+                const devices = await res.json();
+                
+                const list = document.getElementById('deviceList');
+                list.innerHTML = '';
+                
+                if (devices.length === 0) {
+                    list.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">No devices found</p>';
+                } else {
+                    devices.forEach(d => {
+                        const item = document.createElement('div');
+                        item.className = 'device-item';
+                        item.innerHTML = `
+                            <div class="device-info">
+                                <h4>${d.name}</h4>
+                                <p>${d.mac}</p>
+                            </div>
+                            <div class="device-actions">
+                                <button class="btn btn-warning" onclick="pairDevice('${d.mac}')">Pair</button>
+                                <button class="btn btn-success" onclick="connectDevice('${d.mac}')">Connect</button>
+                                <button class="btn btn-danger" onclick="disconnectDevice('${d.mac}')">Disconnect</button>
+                            </div>
+                        `;
+                        list.appendChild(item);
+                    });
+                }
+                
+                showMessage('Scan complete', 'success');
+            } catch (e) {
+                showMessage('Scan failed: ' + e.message, 'error');
+            }
+            
+            btn.disabled = false;
+            scanText.textContent = 'Scan for Devices';
+        }
+
+        async function pairDevice(mac) {
+            showMessage('Pairing...', 'info');
+            try {
+                const res = await fetch(`${SERVER_URL}/api/pair`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mac: mac })
+                });
+                const data = await res.json();
+                showMessage(data.message, data.status === 'success' ? 'success' : 'error');
+            } catch (e) {
+                showMessage('Pairing failed', 'error');
+            }
+        }
+
+        async function connectDevice(mac) {
+            showMessage('Connecting...', 'info');
+            try {
+                const res = await fetch(`${SERVER_URL}/api/connect`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mac: mac })
+                });
+                const data = await res.json();
+                showMessage(data.message, data.status === 'success' ? 'success' : 'error');
+            } catch (e) {
+                showMessage('Connection failed', 'error');
+            }
+        }
+
+        async function disconnectDevice(mac) {
+            showMessage('Disconnecting...', 'info');
+            try {
+                const res = await fetch(`${SERVER_URL}/api/disconnect`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mac: mac })
+                });
+                const data = await res.json();
+                showMessage(data.message, 'success');
+            } catch (e) {
+                showMessage('Disconnect failed', 'error');
+            }
+        }
+
+        function showMessage(msg, type) {
+            const statusMsg = document.getElementById('statusMessage');
+            statusMsg.textContent = msg;
+            statusMsg.style.display = 'block';
+            
+            if (type === 'success') statusMsg.style.background = 'rgba(16, 185, 129, 0.2)';
+            else if (type === 'error') statusMsg.style.background = 'rgba(239, 68, 68, 0.2)';
+            else statusMsg.style.background = 'rgba(74, 158, 255, 0.2)';
+            
+            setTimeout(() => {
+                statusMsg.style.display = 'none';
+            }, 3000);
+        }
+
+        // Auto-connect on load
+        window.addEventListener('load', () => {
+            setTimeout(connectServer, 500);
+        });
+    </script>
+</body>
+</html>

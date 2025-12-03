@@ -1,147 +1,218 @@
 """
-Text-to-Speech Engine for NaviGlass
-Wrapper around Piper for offline text-to-speech with queue management.
+Bluetooth Audio Manager for NaviGlass
+Handles Bluetooth device discovery, pairing, connecting, and setting default audio.
 """
 
-import threading
-import queue
-import os
 import subprocess
 import time
+import re
+from typing import Optional, List, Dict
 
 
-PIPER_BINARY = "./piper/piper"
-VOICE_MODEL = "./piper/en_US-amy-low.onnx"
-
-
-class TTSEngine:
+class BluetoothAudioManager:
     
-    def __init__(self, rate: float = 0.82, volume: float = 0.5, sample_rate: int = 16200): # Initialize TTS engine with default rate (wpm) and volume (0.0 to 1.0)
-
-        self.speech_queue = queue.Queue()
-        self.is_running = False
-        self.worker_thread = None
-        self.pipeline_process = None
-
-        self.rate = rate
-        self.sample_rate = sample_rate
-        self.set_volume(volume)
+    def __init__(self, device_mac: Optional[str] = None):
+        self.device_mac = device_mac
+        self.connected = False
         
-        if not os.path.exists(PIPER_BINARY) or not os.path.exists(VOICE_MODEL):
-            print("ERROR: Piper TTS files not found! Falling back to silent mode.")
-            self.piper_ready = False
-        else:
-            self.piper_ready = True
-            print("Piper Neural TTS Initialized (Voice: Amy).")
-
-
-    def set_volume(self, volume: float): # From 0.0 - 1.0 to %
-        self.volume = max(0.0, min(1.0, volume))
-        vol_pct = int(self.volume * 100)
         
+    def scan_devices(self, duration: int = 10) -> List[Dict[str, str]]:
+        print(f"Scanning for Bluetooth devices for {duration} seconds...")
+        
+        subprocess.run(["bluetoothctl", "scan", "off"], capture_output=True)
+        time.sleep(0.05)
+
+        found_devices = {}
+
         try:
-            subprocess.run(f"amixer -q set Master {vol_pct}%", shell=True)
-            print(f"System volume set to {vol_pct}%")
-        except:
-            print("Warning: Failed to set system volume via amixer.")
-            pass
-
-
-    def start_pipeline(self):
-        if not self.piper_ready: return
-        
-        self.kill_pipeline()
-
-        # THE PIPELINE COMMAND
-        # We run this as one persistent shell command.
-        # Piper reads from stdin, pipes audio to aplay's stdin.
-        # 2>/dev/null hides all the "Loaded voice" logs.
-        cmd = (
-            f"{PIPER_BINARY} --model {VOICE_MODEL} --output_raw "
-            f"--length_scale {self.rate} --sentence_silence 0 "
-            f"| aplay -r {self.sample_rate} -f S16_LE -t raw - --buffer-size=1024 2>/dev/null"
-        )
-        
-        try:
-            self.pipeline_process = subprocess.Popen( # shell=True allows the '|' pipe to work naturally
-                cmd,
-                shell=True,
-                stdin=subprocess.PIPE,   # We write text here
-                stderr=subprocess.DEVNULL # Silence logs
+            proc = subprocess.Popen(
+                ["bluetoothctl"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
             )
-            print("TTS Pipeline Started.")
+
+            proc.stdin.write("scan on\n")
+            proc.stdin.flush()
+
+            time.sleep(duration)
+
+            proc.stdin.write("scan off\n")
+            proc.stdin.flush()
+
+            time.sleep(0.05)
+
+            proc.stdin.write("quit\n")
+            proc.stdin.flush()
+
+            stdout, _ = proc.communicate(timeout=5)
+
+            for line in stdout.splitlines():
+                if "Device" in line:
+                    match = match = re.search(r"Device ([0-9A-Fa-f:]{17}) (.+)", line)
+                    if match:
+                        mac = match.group(1)
+                        name = match.group(2).strip()
+                        if name and mac not in found_devices:
+                            found_devices[mac] = name
+
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            print("Scan timed out")
         except Exception as e:
-            print(f"Failed to start TTS pipeline: {e}")
-
-
-    def kill_pipeline(self):
-        if self.pipeline_process:
-            try:
-                self.pipeline_process.terminate()
-                self.pipeline_process.wait(timeout=0.5)
-            except:
-                pass # Force kill happens on exit usually
-        self.pipeline_process = None
-        
-
-    def start(self): # Start the worker thread
-        if not self.is_running:
-            self.is_running = True
-            self.start_pipeline()
-            self.worker_thread = threading.Thread(target=self._worker, daemon=True)
-            self.worker_thread.start()
-    
-
-    def stop(self): # Stop the thread
-        self.is_running = False
-        self.speech_queue.put(None)
-        if self.worker_thread:
-            self.worker_thread.join()
-        self.kill_pipeline()
-    
-
-    def speak(self, text: str, interrupt: bool = False):
-        if not text: return
-        if interrupt:
-            self.clear_queue()
-            self.kill_pipeline() # Hard stop the current audio
-        self.speech_queue.put(text)
-
-
-    def _speak_persistent(self, text: str):
-        if not self.pipeline_process or self.pipeline_process.poll() is not None:
-            self.start_pipeline()
-            time.sleep(0.2) # Give it a moment to load the model
+            print(f"Scan error: {e}")
 
         try:
-            print(f"[Amy]: {text}")
-            clean_text = text.replace('\n', ' ').strip() + '\n'
-            
-            if self.pipeline_process and self.pipeline_process.stdin:
-                self.pipeline_process.stdin.write(clean_text.encode('utf-8'))
-                self.pipeline_process.stdin.flush()
-                
+            result = subprocess.run(["bluetoothctl", "devices"], capture_output=True, text=True)
+            for line in result.stdout.splitlines():
+                if "Device" in line:
+                    match = match = re.search(r"Device ([0-9A-Fa-f:]{17}) (.+)", line)
+                    if match:
+                        mac = match.group(1)
+                        name = match.group(2).strip()
+                        if name and mac not in found_devices:
+                            found_devices[mac] = name
         except Exception as e:
-            print(f"Pipe Write Error: {e}")
-            self.kill_pipeline() # If write fails, the pipe is likely broken. Restart next time.
+            print("Error getting cached devices")
+
+        return [{"mac": k, "name": v} for k, v in found_devices.items()]
 
 
-    def _worker(self):
-        while self.is_running:
-            try:
-                text = self.speech_queue.get(timeout=1)
-                if text is None: 
-                    self.speech_queue.task_done() 
-                    break 
-                self._speak_persistent(text)
-                self.speech_queue.task_done()
-                
-            except queue.Empty:
-                continue
-            except Exception as e:
-                print(f"TTS Worker Error: {e}")
+    def pair_device(self, mac_address: str) -> bool: 
+        if self._is_device_paired(mac_address):
+            print(f"Device {mac_address} is already paired.")
+            return True
+
+        print(f"Attempting to pair with {mac_address}...")
+        subprocess.run(["bluetoothctl", "trust", mac_address], capture_output=True)
+        result = subprocess.run(["bluetoothctl", "pair", mac_address], capture_output=True, text=True)
+        
+        if "pairing successful" in result.stdout.lower() or "already exists" in result.stderr.lower():
+            return True
+        print(f"Pairing failed: {result.stdout}")
+        return False
+
+
+    def connect_audio(self, mac_address: str) -> bool:
+        print(f"Checking connection status for {mac_address}...")
+
+        if self._is_device_connected(mac_address):
+            print("Device is already connected via Bluetooth.")
+            self.connected = True
+            self.device_mac = mac_address
+            
+            if self._set_default_sink(mac_address):
+                self._force_high_quality_profile(mac_address)
+                return True
+            else:
+                print("Warning: Bluetooth connected, but Audio Sink not found.")
+                return True # Return True because BT is technically fine
+
+        print("Device not connected. Starting Wake-Up Sequence...")
+        
+        try: 
+            subprocess.run(["bluetoothctl", "disconnect", mac_address], capture_output=True)
+        except: pass
+        time.sleep(1) 
+
+        try:
+            print("Attempt: (Waking device)...")
+            subprocess.run(
+                ["bluetoothctl", "connect", mac_address],
+                capture_output=True,
+                text=True,
+                timeout=8
+            ) 
+        except subprocess.TimeoutExpired:
+            print("Connection command timed out. Final status check...")
+        except Exception as e:
+            print(f"Connection error: {e}")
+
+        if self._is_device_connected(mac_address):
+            return self._finalize_connection(mac_address)
+            
+        print("Connection failed.")
+        return False
+
+
+    def disconnect_device(self, mac_address: Optional[str] = None) -> bool:
+        target = mac_address if mac_address else self.device_mac
+        if not target: return False
+        
+        print(f"Disconnecting {target}...")
+        try:
+            subprocess.run(["bluetoothctl", "disconnect", target], capture_output=True, timeout=5)
+        except Exception as e:
+            print("Disconnect command timed out")
+            
+        if not self._is_device_connected(target):
+            self.connected = False
+            if target == self.device_mac: self.device_mac = None
+            return True
+        return False
+
+
+    def _finalize_connection(self, mac_address):
+        print("Connection Confirmed.")
+        self.connected = True
+        self.device_mac = mac_address
+        if self._set_default_sink(mac_address):
+            self._force_high_quality_profile(mac_address)
+        return True
+
+
+    def _is_device_connected(self, mac_address: str) -> bool:
+        try:
+            res = subprocess.run(
+            ["bluetoothctl", "info", mac_address], 
+            capture_output=True, 
+            text=True,
+            timeout=10
+        )
+            return "Connected: yes" in res.stdout
+        except subprocess.TimeoutExpired:
+            print("Connection check timed out")
+            return False
+
+
+    def _is_device_paired(self, mac_address: str) -> bool:
+        res = subprocess.run(["bluetoothctl", "info", mac_address], capture_output=True, text=True)
+        return "Paired: yes" in res.stdout
+
+
+    def _set_default_sink(self, mac_address: str) -> bool:
+        mac_formatted = mac_address.replace(":", "_")
+        for i in range(10): 
+            result = subprocess.run(["pactl", "list", "short", "sinks"], capture_output=True, text=True)
+            for line in result.stdout.splitlines():
+                if mac_formatted in line:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        sink_name = parts[1]
+                    subprocess.run(["pactl", "set-default-sink", sink_name])
+                    return True
+            time.sleep(0.5)
+        return False
+
+
+    def _force_high_quality_profile(self, mac_address: str):
+        mac_formatted = mac_address.replace(":", "_")
+        card_name = f"bluez_card.{mac_formatted}"
+        profiles = ["a2dp-sink", "a2dp_sink", "a2dp_sink_aac", "a2dp_sink_sbc"]
     
+        for profile in profiles:
+            try:
+                result = subprocess.run(
+                    ["pactl", "set-card-profile", card_name, profile], 
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode == 0:
+                    print(f"Audio profile set to: {profile}")
+                    return  # Stop once successful
+            except subprocess.TimeoutExpired:
+                continue
 
-    def clear_queue(self):
-        with self.speech_queue.mutex:
-            self.speech_queue.queue.clear()
+        print("Warning: Could not set high-quality audio profile")
